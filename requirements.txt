@@ -1,0 +1,6 @@
+labml_nn==0.4.133
+networkx==2.8.8
+numpy==1.23.3
+pysat==3.0.5
+python_sat==0.1.7.dev19
+torch==1.12.1
