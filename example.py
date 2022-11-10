@@ -14,7 +14,7 @@ ff_dim = 128
 n_heads = 1
 emb_dim = 128
 dimacs_directory = './dimacs_files/test_small'
-n_transformer_layers = 1
+n_transformer_layers = 4
 dropout = 0.1
 
 
