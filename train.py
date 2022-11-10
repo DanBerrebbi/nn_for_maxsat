@@ -91,12 +91,19 @@ def train_model(constraints, objectives, model, optimizer, criterion, bs):
 
             # get initial embeddings from node2Vec (no gradient here) # TODO : no more Node2Vec --> degree would be better IMO
             nb_nodes = n_nodes_from_constraints(constraint)
-            liste_labels = torch.tensor(np.random.randint(0, 30, size=bs))
             graph = constraints_to_graph(constraint)
             liste_nodes = list(graph.nodes)
             adj_mat = torch.tensor(np.array([nx.to_numpy_matrix(graph)]))
+            #import pdb;pdb.set_trace()
+            nodes_init_embeddings = []  # TODO : replace by one-hot encodings with degree if litteral (or 0 if clause)
+            for i , (node,degree) in enumerate(list(dict(graph.degree).items())):
+                if "c" in str(node) :
+                    nodes_init_embeddings.append(0)
+                else :
+                    nodes_init_embeddings.append(degree)
+            nodes_init_embeddings=torch.nn.functional.one_hot(torch.tensor(nodes_init_embeddings), num_classes=model.init_dim)
 
-            nodes_init_embeddings = torch.ones((bs, nb_nodes, model.init_dim), requires_grad=True)  # TODO : replace by one-hot encodings with degree if litteral (or 0 if clause)
+
 
             # compute the model output
             logits = model(nodes_init_embeddings[0], adj_mat.permute(1, 2, 0))
