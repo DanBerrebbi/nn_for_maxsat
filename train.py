@@ -4,6 +4,7 @@ from pysat.formula import CNF
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 
 def constraints_to_graph(constraints, directed=True):
@@ -86,7 +87,7 @@ def read_dimacs_directory(path):
 
 
 # for lots of reasons, batch size 1 is better to use, lets discuss it later. If needed we accum grad instead.
-def train_model(constraints, objectives, model, optimizer, criterion, bs):
+def train_model(constraints, objectives, model, optimizer, criterion, bs, n_epochs=20, debug=False, temp=0.01, temp2=0.1, gumbel=False, tau=0.1):
 
     # log :
     print(model)
@@ -94,63 +95,96 @@ def train_model(constraints, objectives, model, optimizer, criterion, bs):
 
 
     # enumerate epochs
-    for epoch in range(20):
+    for epoch in range(n_epochs):
         print("--- Epoch {} ---".format(epoch))
         for I, constraint in enumerate(constraints):
             optimizer.zero_grad()
-            #import pdb;pdb.set_trace()
-            # get initial embeddings from node2Vec (no gradient here) # TODO : no more Node2Vec --> degree would be better IMO
+
             nb_nodes = n_nodes_from_constraints(constraint)
             graph = constraints_to_graph(constraint)
             liste_nodes = list(graph.nodes)
             adj_mat = torch.tensor(np.array([nx.to_numpy_matrix(graph)]))
-            
+
+
+            # initial emeddings : degree
             nodes_init_embeddings = []  # TODO : replace by one-hot encodings with degree if litteral (or 0 if clause)
             for i , (node, degree) in enumerate(list(dict(graph.in_degree).items())):   # needs directed graphs ! 
-                if False and "c" in str(node) :
+                if True and "c" in str(node) :
                     nodes_init_embeddings.append([-1,-1])   # maybe not, maybe we should embed them as "normal nodes"
                 else :
                     nodes_init_embeddings.append([float(degree), float(graph.out_degree[node])])
             nodes_init_embeddings=torch.tensor(nodes_init_embeddings)
-            #nodes_init_embeddings=torch.rand(len(liste_nodes), 64)
-            #import pdb;pdb.set_trace()
 
             # compute the model output
             #logits = model(nodes_init_embeddings, adj_mat.permute(1, 2, 0))
             logits = model(nodes_init_embeddings, adj_mat)
-            
-            # add projection/summation head to get the number of satisfied assignments
-            # trick
-            #import pdb; pdb.set_trace()
-            temp = 0.1
-            sftm = torch.nn.functional.softmax(logits[0] / temp, -1)
-            # need to duplicate sftm so that there is the negatives. Probably smarter way to do it
-            litteral_lines=[]
-            for ii,node in enumerate(liste_nodes):
-              if type(node)==int:
-                litteral_lines.append(ii)
+
+            litteral_lines = []
+            for ii, node in enumerate(liste_nodes):
+                if type(node) == int:
+                    litteral_lines.append(ii)
             liste_nodes_litterals = [liste_nodes[x] for x in litteral_lines]
             liste_nodes_litterals_full = [x for x in liste_nodes_litterals]
-            for jj,lit in enumerate(liste_nodes_litterals):
-              liste_nodes_litterals_full.append(-abs(lit))
-            sftm_lit = sftm[litteral_lines]
-            
-            sftm_lit_bar = torch.ones_like(sftm_lit, requires_grad=True) - sftm_lit
-            sftm_lit_full = torch.cat((sftm_lit, sftm_lit_bar), 0)
-            
-            sat = torch.sum(torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)], -1).values,   # ici faut faire attention a si c'est un moins ou un plus
-                            dtype=torch.float32)
-            
-            # calculate loss
-            targets = objectives[I]  # TODO get real !! Check
-            loss = 10*criterion(sat, targets)
-            # no need for additional loss for hard constraints here !
+            for jj, lit in enumerate(liste_nodes_litterals):
+                liste_nodes_litterals_full.append(-abs(lit))
+
+
+            # add projection/summation head to get the number of satisfied assignments
+            # trick
+
+            if gumbel : # TODO maybe get rid of the softmax at the end of the model !
+                liste_sat = []
+                #import pdb; pdb.set_trace()
+                liste_one_hot = [F.gumbel_softmax(logits, tau=tau, hard=True) for _ in range(30)] # TODO : try with hard = False also !
+                print([x[litteral_lines] for x in liste_one_hot])
+                for assign in liste_one_hot:
+                    sftm_lit = assign[0][litteral_lines]
+                    sftm_lit_bar = torch.ones_like(sftm_lit, requires_grad=True) - sftm_lit
+                    sftm_lit_full = torch.cat((sftm_lit, sftm_lit_bar), 0)
+                    #print(torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)]))
+                    #sat = torch.sum(
+                    #    torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)],
+                    #              -1).values, dtype=torch.float32)
+                    #assert 7==0, sftm_lit_full[:, 0].shape
+                    AUX=torch.stack([sftm_lit_full[:, 0][cc] for cc in constraint_to_ids(constraint, liste_nodes_litterals_full)])
+                    print(AUX)
+                    sat = torch.sum(torch.nn.functional.softmax(AUX / temp2, -1) * AUX)
+                    liste_sat.append(sat)
+                    #print(torch.sum(torch.round(torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)],-1).values)))
+                #print(liste_sat)
+                sat = torch.sum(torch.stack(liste_sat)) / len(liste_sat)
+
+            else : # pr recup les perf que j avais avant
+                sftm = torch.nn.functional.softmax(logits[0] / temp, -1)
+
+                #print(logits)
+                # need to duplicate sftm so that there is the negatives. Probably smarter way to do it
+                sftm_lit = sftm[litteral_lines]
+                sftm_lit_bar = torch.ones_like(sftm_lit, requires_grad=True) - sftm_lit
+                sftm_lit_full = torch.cat((sftm_lit, sftm_lit_bar), 0)
+                AUX = torch.stack(
+                    [sftm_lit_full[:, 0][cc] for cc in constraint_to_ids(constraint, liste_nodes_litterals_full)])
+                sat = torch.sum(torch.nn.functional.softmax(AUX / temp2, -1) * AUX)
+                print("AUX : ", AUX)
+                # calculate loss
+            targets = objectives[I]
+            loss = criterion(sat, targets)
+                # no need for additional loss for hard constraints here !
+
             loss.backward()
+
+            if debug :
+                for name, param in model.named_parameters():
+                    print(name, param.grad)
+
             optimizer.step()
+            #import pdb; pdb.set_trace()
+            print(logits[0][litteral_lines])
 
             if I % 1 == 0 :
                 print("loss :", loss.item(), "   sat : ", sat.item())
     print("sat : ", sat)
+    return sat
     # print(sftm)
 
 

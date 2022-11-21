@@ -206,13 +206,14 @@ class GATCodeur(torch.nn.Module):
         self.encoders = Stacked_Encoder(n_layers, ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout)
         self.init_dim=in_features
 
-    def forward(self, src, adj_mat, msk=None):
-        #import pdb; pdb.set_trace()
+        #torch.nn.init.xavier_uniform(self.proj1.weight)
+
+    def forward(self, src, adj_mat):
         init_emb=self.proj1(src)[None, :]
         gat_output = self.GAT(init_emb, msk=adj_mat)
-        #gat_output = self.GAT(src)
         proj=self.encoders(gat_output)
-        logits = torch.nn.functional.softmax(proj, dim=-1)
+        #logits = torch.nn.functional.softmax(proj, dim=-1)
+        logits = torch.nn.functional.gumbel_softmax(proj, dim=-1)
         return logits
 
 
@@ -249,8 +250,8 @@ class Encoder(torch.nn.Module):
         tmp = tmp2 + src
 
         # NORM
-       # tmp1 = self.norm_ff(tmp)  THIS NORM CAUSES A NAN PROBLEM !!!!!
-        tmp1 = tmp
+        tmp1 = self.norm_ff(tmp)   # THIS NORM CAUSES A NAN PROBLEM !!!!!
+        #tmp1 = tmp
         # FF
         tmp2 = self.feedforward(tmp1)  # [bs, ls, ed] contains dropout
         # ADD
