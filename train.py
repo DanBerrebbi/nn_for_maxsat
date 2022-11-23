@@ -87,38 +87,37 @@ def read_dimacs_directory(path):
 
 
 # for lots of reasons, batch size 1 is better to use, lets discuss it later. If needed we accum grad instead.
-def train_model(constraints, objectives, model, optimizer, criterion, bs, n_epochs=20, debug=False, temp=0.01, temp2=0.1, gumbel=False, tau=0.1):
+def train_model(constraints, objectives, model, optimizer, criterion, log=True, n_epochs=20, debug=False, temp=0.01, gumbel=False):
 
-    # log :
-    print(model)
-    print("Number of parameters : ", sum(p.numel() for p in model.parameters()))
-
+    if log :
+        print(model)
+        print("Number of parameters : ", sum(p.numel() for p in model.parameters()))
 
     # enumerate epochs
     for epoch in range(n_epochs):
-        print("--- Epoch {} ---".format(epoch))
-        for I, constraint in enumerate(constraints):
+        if log:
+            print("--- Epoch {} ---".format(epoch))
+        for I, constraint in enumerate(constraints):  # iterate over the set of SAT problems, constraint is a list of clauses
             optimizer.zero_grad()
 
             nb_nodes = n_nodes_from_constraints(constraint)
-            graph = constraints_to_graph(constraint)
+            graph = constraints_to_graph(constraint)  # build the graph : a directed edge links a clause to its literal, the direction depends on the sign of the literal
             liste_nodes = list(graph.nodes)
             adj_mat = torch.tensor(np.array([nx.to_numpy_matrix(graph)]))
 
 
-            # initial emeddings : degree
-            nodes_init_embeddings = []  # TODO : replace by one-hot encodings with degree if litteral (or 0 if clause)
-            for i , (node, degree) in enumerate(list(dict(graph.in_degree).items())):   # needs directed graphs ! 
-                if True and "c" in str(node) :
-                    nodes_init_embeddings.append([-1,-1])   # maybe not, maybe we should embed them as "normal nodes"
-                else :
-                    nodes_init_embeddings.append([float(degree), float(graph.out_degree[node])])
+            # initial emeddings : degree ;  TODO : we should now try using the outputs of Neurosat
+            nodes_init_embeddings = []
+            for i , (node, degree) in enumerate(list(dict(graph.in_degree).items())):   # need directed graphs to differentiate x_1 and -x_1 !
+                nodes_init_embeddings.append([float(degree), float(graph.out_degree[node])])
             nodes_init_embeddings=torch.tensor(nodes_init_embeddings)
 
             # compute the model output
-            #logits = model(nodes_init_embeddings, adj_mat.permute(1, 2, 0))
-            logits = model(nodes_init_embeddings, adj_mat)
+            logits = model(nodes_init_embeddings, adj_mat, temp, gumbel)
 
+            # compute the loss/objective value
+
+            # First, only keep values of literal embeddings (not clauses embeddings)
             litteral_lines = []
             for ii, node in enumerate(liste_nodes):
                 if type(node) == int:
@@ -128,47 +127,30 @@ def train_model(constraints, objectives, model, optimizer, criterion, bs, n_epoc
             for jj, lit in enumerate(liste_nodes_litterals):
                 liste_nodes_litterals_full.append(-abs(lit))
 
+            # need to duplicate sftm so that there is the negatives. Probably there exist smarter way to do it
+            sftm_lit = logits[0][litteral_lines]
+            sftm_lit_bar = torch.ones_like(sftm_lit, requires_grad=True) - sftm_lit
+            sftm_lit_full = torch.cat((sftm_lit, sftm_lit_bar), 0)
+            AUX = torch.stack(
+                [sftm_lit_full[:, 0][cc] for cc in constraint_to_ids(constraint, liste_nodes_litterals_full)]) # AUX : list of clauses with the value of literals of this clause
 
-            # add projection/summation head to get the number of satisfied assignments
-            # trick
+            # chose a way to calculate the SAT value / objective / number of clauses satisfied
 
-            if gumbel : # TODO maybe get rid of the softmax at the end of the model !
-                liste_sat = []
-                #import pdb; pdb.set_trace()
-                liste_one_hot = [F.gumbel_softmax(logits, tau=tau, hard=True) for _ in range(30)] # TODO : try with hard = False also !
-                print([x[litteral_lines] for x in liste_one_hot])
-                for assign in liste_one_hot:
-                    sftm_lit = assign[0][litteral_lines]
-                    sftm_lit_bar = torch.ones_like(sftm_lit, requires_grad=True) - sftm_lit
-                    sftm_lit_full = torch.cat((sftm_lit, sftm_lit_bar), 0)
-                    #print(torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)]))
-                    #sat = torch.sum(
-                    #    torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)],
-                    #              -1).values, dtype=torch.float32)
-                    #assert 7==0, sftm_lit_full[:, 0].shape
-                    AUX=torch.stack([sftm_lit_full[:, 0][cc] for cc in constraint_to_ids(constraint, liste_nodes_litterals_full)])
-                    print(AUX)
-                    sat = torch.sum(torch.nn.functional.softmax(AUX / temp2, -1) * AUX)
-                    liste_sat.append(sat)
-                    #print(torch.sum(torch.round(torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)],-1).values)))
-                #print(liste_sat)
-                sat = torch.sum(torch.stack(liste_sat)) / len(liste_sat)
+            # 1: sum all (then multiply targets by 3 for the loss value)
+            sat = torch.sum(AUX)
 
-            else : # pr recup les perf que j avais avant
-                sftm = torch.nn.functional.softmax(logits[0] / temp, -1)
+            # 2 : softmaxed weighted sum
+            # sat = torch.sum(torch.nn.functional.softmax(AUX / temp, -1) * AUX) # TODO : we can put another temerature here, like temp2, a bit overloading
 
-                #print(logits)
-                # need to duplicate sftm so that there is the negatives. Probably smarter way to do it
-                sftm_lit = sftm[litteral_lines]
-                sftm_lit_bar = torch.ones_like(sftm_lit, requires_grad=True) - sftm_lit
-                sftm_lit_full = torch.cat((sftm_lit, sftm_lit_bar), 0)
-                AUX = torch.stack(
-                    [sftm_lit_full[:, 0][cc] for cc in constraint_to_ids(constraint, liste_nodes_litterals_full)])
-                sat = torch.sum(torch.nn.functional.softmax(AUX / temp2, -1) * AUX)
-                print("AUX : ", AUX)
-                # calculate loss
-            targets = objectives[I]
-            loss = criterion(sat, targets)
+            # 3 : max : but problem of exploration (can be solved by setting gumbel=True)
+            #sat = torch.sum(
+                #    torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)],
+                #              -1).values, dtype=torch.float32)
+
+
+            # calculate loss
+            targets = objectives[I]*3.0
+            loss = criterion(sat, targets) + 0*abs(sftm_lit_full[:,0]-sftm_lit_full[:,1]).sum() # second term to enforce parity and so exploration
                 # no need for additional loss for hard constraints here !
 
             loss.backward()
@@ -178,11 +160,12 @@ def train_model(constraints, objectives, model, optimizer, criterion, bs, n_epoc
                     print(name, param.grad)
 
             optimizer.step()
-            #import pdb; pdb.set_trace()
-            print(logits[0][litteral_lines])
+            if log :
+                print(logits[0][litteral_lines])
 
-            if I % 1 == 0 :
+            if log :
                 print("loss :", loss.item(), "   sat : ", sat.item())
+    print(AUX)
     print("sat : ", sat)
     return sat
     # print(sftm)

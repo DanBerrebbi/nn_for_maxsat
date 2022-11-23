@@ -3,217 +3,26 @@ import math
 import numpy as np
 import torch
 from torch import nn
-from labml_nn.graphs.gat import GraphAttentionLayer
-import torch.nn.functional as F
-
-
-class GraphAttentionLayer(nn.Module):
-    """
-    Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
-    """
-    def __init__(self, in_features, out_features, dropout, alpha, concat=True):
-        super(GraphAttentionLayer, self).__init__()
-        self.dropout = dropout
-        self.in_features = in_features
-        self.out_features = out_features
-        self.alpha = alpha
-        self.concat = concat
-
-        self.W = nn.Parameter(torch.empty(size=(in_features, out_features)))
-        nn.init.xavier_uniform_(self.W.data, gain=1.414)
-        self.a = nn.Parameter(torch.empty(size=(2*out_features, 1)))
-        nn.init.xavier_uniform_(self.a.data, gain=1.414)
-
-        self.leakyrelu = nn.LeakyReLU(self.alpha)
-
-    def forward(self, h, adj):
-        Wh = torch.mm(h, self.W) # h.shape: (N, in_features), Wh.shape: (N, out_features)
-        print("a")
-        e = self._prepare_attentional_mechanism_input(Wh)
-        print("b")
-        zero_vec = -9e15*torch.ones_like(e)
-        attention = torch.where(adj > 0, e, zero_vec)
-        attention = F.softmax(attention, dim=1)
-        attention = F.dropout(attention, self.dropout, training=self.training)
-        h_prime = torch.matmul(attention, Wh)
-        if self.concat:
-            return F.elu(h_prime)
-        else:
-            return h_prime
-
-    def _prepare_attentional_mechanism_input(self, Wh):
-        # Wh.shape (N, out_feature)
-        # self.a.shape (2 * out_feature, 1)
-        # Wh1&2.shape (N, 1)
-        # e.shape (N, N)
-        Wh1 = torch.matmul(Wh, self.a[:self.out_features, :])
-        Wh2 = torch.matmul(Wh, self.a[self.out_features:, :])
-        # broadcast add
-        e = Wh1 + Wh2.T
-        return self.leakyrelu(e)
-
-
-
-
-
-class SpecialSpmmFunction(torch.autograd.Function):
-    """Special function for only sparse region backpropataion layer."""
-    @staticmethod
-    def forward(ctx, indices, values, shape, b):
-        assert indices.requires_grad == False
-        a = torch.sparse_coo_tensor(indices, values, shape)
-        ctx.save_for_backward(a, b)
-        ctx.N = shape[0]
-        return torch.matmul(a, b)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        a, b = ctx.saved_tensors
-        grad_values = grad_b = None
-        if ctx.needs_input_grad[1]:
-            grad_a_dense = grad_output.matmul(b.t())
-            edge_idx = a._indices()[0, :] * ctx.N + a._indices()[1, :]
-            grad_values = grad_a_dense.view(-1)[edge_idx]
-        if ctx.needs_input_grad[3]:
-            grad_b = a.t().matmul(grad_output)
-        return None, grad_values, None, grad_b
-
-
-class SpecialSpmm(nn.Module):
-    def forward(self, indices, values, shape, b):
-        return SpecialSpmmFunction.apply(indices, values, shape, b)
-
-    
-class SpGraphAttentionLayer(nn.Module):
-    """
-    Sparse version GAT layer, similar to https://arxiv.org/abs/1710.10903
-    """
-
-    def __init__(self, in_features, out_features, dropout, alpha=0.3, concat=True):
-        super(SpGraphAttentionLayer, self).__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.alpha = alpha
-        self.concat = concat
-
-        self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
-        nn.init.xavier_normal_(self.W.data, gain=1.414)
-                
-        self.a = nn.Parameter(torch.zeros(size=(1, 2*out_features)))
-        nn.init.xavier_normal_(self.a.data, gain=1.414)
-
-        self.dropout = nn.Dropout(dropout)
-        self.leakyrelu = nn.LeakyReLU(self.alpha)
-        self.special_spmm = SpecialSpmm()
-
-    def forward(self, input, adj):
-        dv = 'cuda' if input.is_cuda else 'cpu'
-
-        N = input.size()[0]
-        edge = adj.nonzero().t()
-
-        h = torch.mm(input, self.W)
-        # h: N x out
-        assert not torch.isnan(h).any()
-
-        # Self-attention on the nodes - Shared attention mechanism
-        edge_h = torch.cat((h[edge[0, :], :], h[edge[1, :], :]), dim=1).t()
-        # edge: 2*D x E
-
-        edge_e = torch.exp(-self.leakyrelu(self.a.mm(edge_h).squeeze()))
-        assert not torch.isnan(edge_e).any()
-        # edge_e: E
-
-        e_rowsum = self.special_spmm(edge, edge_e, torch.Size([N, N]), torch.ones(size=(N,1), device=dv))
-        # e_rowsum: N x 1
-
-        edge_e = self.dropout(edge_e)
-        # edge_e: E
-
-        h_prime = self.special_spmm(edge, edge_e, torch.Size([N, N]), h)
-        assert not torch.isnan(h_prime).any()
-        # h_prime: N x out
-        
-        h_prime = h_prime.div(e_rowsum)
-        # h_prime: N x out
-        assert not torch.isnan(h_prime).any()
-
-        if self.concat:
-            # if this layer is not last layer,
-            return F.elu(h_prime)
-        else:
-            # if this layer is last layer,
-            return h_prime
-
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
-
-
-
-class GAT(torch.nn.Module):
-    """
-    ## Graph Attention Network (GAT)
-
-    This graph attention network has two [graph attention layers](index.html).
-    """
-
-    def __init__(self, in_features: int, n_hidden: int, n_heads: int, dropout: float):
-        """
-        * `in_features` is the number of features per node
-        * `n_hidden` is the number of features in the first graph attention layer
-        * `n_classes` is the number of classes
-        * `n_heads` is the number of heads in the graph attention layers
-        * `dropout` is the dropout probability
-        """
-        super().__init__()
-
-        # First graph attention layer where we concatenate the heads
-        self.layer1 = GraphAttentionLayer(in_features, n_hidden, n_heads, is_concat=False, dropout=dropout)
-        # Activation function after first graph attention layer
-        self.activation = nn.ELU()
-        # Final graph attention layer where we average the heads
-        self.output = nn.Linear(n_hidden, 128)
-        # Dropout
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x: torch.Tensor, adj_mat: torch.Tensor):
-        """
-        * `x` is the features vectors of shape `[n_nodes, in_features]`
-        * `adj_mat` is the adjacency matrix of the form
-         `[n_nodes, n_nodes, n_heads]` or `[n_nodes, n_nodes, 1]`
-        """
-        # Apply dropout to the input
-        x = self.dropout(x)
-        # First graph attention layer
-        x = self.layer1(x, adj_mat)
-        # Activation function
-        x = self.activation(x)
-        # Dropout
-        x = self.dropout(x)
-        # Output layer (without activation) for logits
-        return self.output(x)
 
 
 class GATCodeur(torch.nn.Module):
     def __init__(self, n_layers, in_features, n_hidden, ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout):
         super(GATCodeur, self).__init__()
 
-        # GAT related :
-        #self.GAT = GAT(in_features, n_hidden, n_heads, dropout)
-        #self.GAT = SpGraphAttentionLayer(in_features, ff_dim, dropout, alpha=0.2, concat=True)
         self.proj1 = nn.Linear(in_features,ff_dim)
         self.GAT = Encoder(ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout)
         self.encoders = Stacked_Encoder(n_layers, ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout)
         self.init_dim=in_features
 
-        #torch.nn.init.xavier_uniform(self.proj1.weight)
 
-    def forward(self, src, adj_mat):
+    def forward(self, src, adj_mat, temp=0.1, gumbel=False):
         init_emb=self.proj1(src)[None, :]
         gat_output = self.GAT(init_emb, msk=adj_mat)
         proj=self.encoders(gat_output)
-        #logits = torch.nn.functional.softmax(proj, dim=-1)
-        logits = torch.nn.functional.gumbel_softmax(proj, dim=-1)
+        if gumbel :
+            logits = torch.nn.functional.gumbel_softmax(proj / temp, dim=-1)  # we can use gumbel softmax here to force more exploration
+        else:
+            logits = torch.nn.functional.softmax(proj/temp, dim=-1)
         return logits
 
 
@@ -250,7 +59,7 @@ class Encoder(torch.nn.Module):
         tmp = tmp2 + src
 
         # NORM
-        tmp1 = self.norm_ff(tmp)   # THIS NORM CAUSES A NAN PROBLEM !!!!!
+        tmp1 = self.norm_ff(tmp)
         #tmp1 = tmp
         # FF
         tmp2 = self.feedforward(tmp1)  # [bs, ls, ed] contains dropout
@@ -279,18 +88,15 @@ class MultiHead_Attn(torch.nn.Module):
         # k is [bs, lk, ed]
         # v is [bs, lv, ed]
         # msk is [bs, 1, ls] or [bs, lt, lt]
-        # logging.info('q = {}'.format(q.shape))
-        # logging.info('k = {}'.format(k.shape))
-        # logging.info('v = {}'.format(v.shape))
 
         if msk is not None:
             msk = msk.unsqueeze(1)  # [bs, 1, 1, ls] or [bs, 1, lt, lt]
 
         # logging.info('msk = {}'.format(msk.shape))
         bs = q.shape[0]
-        lq = q.shape[1]  ### sequence length of q vectors (length of target sentences)
-        lk = k.shape[1]  ### sequence length of k vectors (may be length of source/target sentences)
-        lv = v.shape[1]  ### sequence length of v vectors (may be length of source/target sentences)
+        lq = q.shape[1]
+        lk = k.shape[1]
+        lv = v.shape[1]
 
         assert self.ed == q.shape[2] == k.shape[2] == v.shape[2], (self.ed, q.shape)
         assert lk == lv  # when applied in decoder both refer the source-side (lq refers the target-side)
