@@ -151,7 +151,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, bs, n_epoc
                     sat = torch.sum(torch.nn.functional.softmax(AUX / temp2, -1) * AUX)
                     liste_sat.append(sat)
                     #print(torch.sum(torch.round(torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)],-1).values)))
-                #print(liste_sat)
+                # print(liste_sat)
                 sat = torch.sum(torch.stack(liste_sat)) / len(liste_sat)
 
             else : # pr recup les perf que j avais avant
@@ -183,6 +183,8 @@ def train_model(constraints, objectives, model, optimizer, criterion, bs, n_epoc
 
             if I % 1 == 0 :
                 print("loss :", loss.item(), "   sat : ", sat.item())
+
+                #print(liste_sat)
     print("sat : ", sat)
     return sat
     # print(sftm)

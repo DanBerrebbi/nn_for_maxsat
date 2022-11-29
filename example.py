@@ -12,7 +12,8 @@ output_dim_gat = 64
 ff_dim = 64
 n_heads = 1
 emb_dim = 64
-dimacs_directory = './dimacs_files/test_vsmall'
+dimacs_directory = '/longterm/saranya/neurosat/dimacs/test/ksat3_weighted/grp1'
+#dimacs_directory = './dimacs_files/test_vsmall'
 n_transformer_layers = 2
 dropout = 0.0
 
