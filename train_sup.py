@@ -143,7 +143,8 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
     for epoch in range(n_epochs):
         if log or True:
             print("--- Epoch {} ---".format(epoch))
-        for I, constraint in enumerate(constraints):  # iterate over the set of SAT problems, constraint is a list of clauses
+            eval_model(constraints[9*len(constraints)//10:], objectives[9*len(constraints)//10:], model)
+        for I, constraint in enumerate(constraints[:9*len(constraints)//10]):  # iterate over the set of SAT problems, constraint is a list of clauses
             optimizer.zero_grad()
             nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features)
 
@@ -193,3 +194,35 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
     # print(sftm)
 
 
+
+def eval_model(constraints, objectives, model, init_emb="random"):
+    acc = 0.0
+    for I, constraint in enumerate(
+            constraints):  # iterate over the set of SAT problems, constraint is a list of clauses
+        nodes_init_embeddings, adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb,
+                                                                               init_dim=model.in_features)
+
+        # compute the model output
+        logits = model(nodes_init_embeddings, adj_mat, temp=0.001, gumbel=False)
+
+        # compute the loss/objective value
+
+        # First, only keep values of literal embeddings (not clauses embeddings)
+        litteral_lines = {}
+        for ii, node in enumerate(liste_nodes):
+            if type(node) == int:
+                litteral_lines[node] = ii
+        litteral_lines_s = {k: v for k, v in sorted(litteral_lines.items(), key=lambda x: x[0])}
+        selected_lines = list(litteral_lines_s.values())
+
+        keep_target = [k - 1 for k in litteral_lines_s.keys()]
+        # need to duplicate sftm so that there is the negatives. Probably there exist smarter way to do it
+        sftm_lit = logits[0][selected_lines]
+
+        # calculate loss
+
+        targets = objectives[I][keep_target]  # *3.0
+        acc += ((sftm_lit.max(dim=-1).indices == targets.max(dim=-1).indices).float().sum()).item()/len(sftm_lit)
+        #print(acc/I)
+    print("test accuracy :", acc/len(constraints))
+    return acc/len(constraints)

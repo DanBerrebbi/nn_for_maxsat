@@ -1,4 +1,4 @@
-from train_sup import train_model
+from train_sup import train_model, eval_model
 from train_sup import read_dimacs_directory_ass
 from classes import GATCodeur
 import torch
@@ -31,12 +31,12 @@ model = GATCodeur(n_layers=n_transformer_layers,
 # loss and optimization  # TODO : see if GAT has a particular optimization
 criterion = CrossEntropyLoss()
 
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.98), eps=1e-09)
-#optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+#optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-09)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
 constraints, objective, ass = read_dimacs_directory_ass(dimacs_directory)
 #objective = torch.tensor([[1.,0.],[0.,1.],[0.,1.]])
 
-train_model(constraints[:101], ass[:101], model, optimizer, criterion, log=False, n_epochs=200, debug=False, temp=1, gumbel=False)
+train_model(constraints[:1000], ass[:1000], model, optimizer, criterion, log=False, n_epochs=3, debug=False, temp=1, gumbel=False)
 
-
+eval_model(constraints[-100:], ass[-100:], model)
