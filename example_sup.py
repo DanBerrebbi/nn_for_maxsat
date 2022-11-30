@@ -26,6 +26,8 @@ model = GATCodeur(n_layers=n_transformer_layers,
                   v_dim=emb_dim,
                   dropout=dropout)
 
+
+
 # loss and optimization  # TODO : see if GAT has a particular optimization
 criterion = CrossEntropyLoss()
 
