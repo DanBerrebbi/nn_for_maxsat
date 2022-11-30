@@ -190,7 +190,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
                 print("loss :", loss.item())
                 #import pdb; pdb.set_trace()
                 print("acc :", (sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum())
-        print(acc_train/(I+1))
+        print("train accuracy :",acc_train/(I+1))
     #print("sftm : ", sftm_lit)
     #return sftm_lit
     # print(sftm)
@@ -227,5 +227,5 @@ def eval_model(constraints, objectives, model, init_emb="random"):
         targets = objectives[I][keep_target]  # *3.0
         acc += ((sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum()).item()/len(sftm_lit)
         #print(acc/I)
-    print("test accuracy :", acc/len(constraints))
+    print("valid accuracy :", acc/len(constraints))
     return acc/len(constraints)
