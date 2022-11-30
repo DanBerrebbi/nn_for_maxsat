@@ -167,7 +167,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
             # calculate loss
 
             targets = objectives[I][keep_target] #*3.0
-            loss = criterion(sftm_lit, targets)
+            loss = criterion(sftm_lit, targets.to(device))
 
             loss.backward()
 
