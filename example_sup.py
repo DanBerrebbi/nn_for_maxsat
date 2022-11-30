@@ -37,6 +37,6 @@ optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 constraints, objective, ass = read_dimacs_directory_ass(dimacs_directory)
 #objective = torch.tensor([[1.,0.],[0.,1.],[0.,1.]])
 
-train_model(constraints[:1000], ass[:1000], model, optimizer, criterion, log=False, n_epochs=3, debug=False, temp=1, gumbel=False)
+train_model(constraints[:1000], ass[:1000], model, optimizer, criterion, log=False, n_epochs=300, debug=False, temp=1, gumbel=False)
 
 eval_model(constraints[-100:], ass[-100:], model)
