@@ -187,7 +187,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
             if np.random.random()<0.1 :
                 print("loss :", loss.item())
                 #import pdb; pdb.set_trace()
-                print("acc :", (sftm_lit.max(dim=-1).indices == targets.max(dim=-1).indices).float().sum())
+                print("acc :", (sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum())
     #print("sftm : ", sftm_lit)
     #return sftm_lit
     # print(sftm)
