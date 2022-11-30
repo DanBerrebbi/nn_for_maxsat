@@ -143,7 +143,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
     for epoch in range(n_epochs):
         if log or True:
             print("--- Epoch {} ---".format(epoch))
-            eval_model(constraints[9*len(constraints)//10:], objectives[9*len(constraints)//10:], model)
+            eval_model(constraints[9*len(constraints)//10:].to(device), objectives[9*len(constraints)//10:].to(device), model)
         for I, constraint in enumerate(constraints[:9*len(constraints)//10]):  # iterate over the set of SAT problems, constraint is a list of clauses
             optimizer.zero_grad()
             nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features)
