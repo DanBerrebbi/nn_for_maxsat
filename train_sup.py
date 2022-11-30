@@ -141,6 +141,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
 
     # enumerate epochs
     for epoch in range(n_epochs):
+        acc_train = 0
         if log or True:
             print("--- Epoch {} ---".format(epoch))
             eval_model(constraints[9*len(constraints)//10:], objectives[9*len(constraints)//10:], model)
@@ -184,11 +185,12 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
                 print("sftm : ", sftm_lit)
                 print("loss :", loss.item())
                 print("$$$"*30)
-
-            if np.random.random()<0.003 :
+            acc_train += ((sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum()).item()/len(sftm_lit)
+            if np.random.random()<0.00 :
                 print("loss :", loss.item())
                 #import pdb; pdb.set_trace()
                 print("acc :", (sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum())
+        print(acc_train/(I+1))
     #print("sftm : ", sftm_lit)
     #return sftm_lit
     # print(sftm)
