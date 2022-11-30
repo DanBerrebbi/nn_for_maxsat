@@ -32,7 +32,7 @@ model = GATCodeur(n_layers=n_transformer_layers,
 criterion = CrossEntropyLoss()
 
 #optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-09)
-optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 
 constraints, objective, ass = read_dimacs_directory_ass(dimacs_directory)
 #objective = torch.tensor([[1.,0.],[0.,1.],[0.,1.]])
