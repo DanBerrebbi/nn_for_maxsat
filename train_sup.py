@@ -148,7 +148,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
             nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features)
 
             # compute the model output
-            logits = model(nodes_init_embeddings.to(device), adj_mat, temp, gumbel)
+            logits = model(nodes_init_embeddings.to(device), adj_mat.to(device), temp, gumbel)
 
             # compute the loss/objective value
 
