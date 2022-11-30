@@ -8,8 +8,8 @@ from torch import nn
 class GATCodeur(torch.nn.Module):
     def __init__(self, n_layers, in_features, n_hidden, ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout):
         super(GATCodeur, self).__init__()
-
-        self.proj1 = nn.Linear(in_features,ff_dim)
+        self.in_features = in_features
+        self.proj1 = nn.Linear(in_features, ff_dim)
         self.GAT = Encoder(ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout)
         self.encoders = Stacked_Encoder(n_layers, ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout)
         self.init_dim=in_features
@@ -117,6 +117,7 @@ class MultiHead_Attn(torch.nn.Module):
             #s = s.masked_fill(msk == 0, float('-inf'))  # score=-Inf to masked tokens
             s = s.masked_fill(msk == 0, -1000)
         w = torch.nn.functional.softmax(s, dim=-1)  # [bs,nh,lq,lk] (these are the attention weights)
+        #import pdb; pdb.set_trace()
         #### we can use relu instead of softmax: w = torch.nn.functional.relu(s)
         w = self.dropout(w)  # [bs,nh,lq,lk]
 

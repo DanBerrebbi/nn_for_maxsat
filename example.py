@@ -5,15 +5,15 @@ import torch
 from torch.nn import MSELoss, L1Loss
 
 
-init_dim = 2
+init_dim = 32
 hidden_dim_gat = 64
 output_dim_gat = 64
 ff_dim = 64
 n_heads = 1
 emb_dim = 64
-dimacs_directory = './dimacs_files/test_small'
+dimacs_directory = './dimacs_files/test_vsmall'
 n_transformer_layers = 0
-dropout = 0.1
+dropout = 0.0
 
 #torch.manual_seed(222222)
 model = GATCodeur(n_layers=n_transformer_layers,
@@ -29,11 +29,11 @@ model = GATCodeur(n_layers=n_transformer_layers,
 # loss and optimization  # TODO : see if GAT has a particular optimization
 criterion = MSELoss()
 
-#optimizer = torch.optim.Adam(model.parameters(), lr=0.01, betas=(0.9, 0.98), eps=1e-09)
-optimizer = torch.optim.SGD(model.parameters(), lr=0.0001)
+#optimizer = torch.optim.Adam(model.parameters(), lr=0.1, betas=(0.9, 0.98), eps=1e-09)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.001)
 
 constraints, objective = read_dimacs_directory(dimacs_directory)
 
-train_model([constraints[0]], torch.tensor([float(len(constraints[0][0]))]), model, optimizer, criterion, log=True, n_epochs=5, debug=False, temp=1,  gumbel=False)
+train_model([constraints[0]], torch.tensor([float(len(constraints[0][0]))]), model, optimizer, criterion, log=True, n_epochs=10, debug=False, temp=1, gumbel=True)
 
 

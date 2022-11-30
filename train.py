@@ -84,10 +84,29 @@ def read_dimacs_directory(path):
     return constraints, objectives
 
 
+def constraint_to_embeddings(constraint, seed, init="random", init_dim=64):
+    graph = constraints_to_graph(
+        constraint)  # build the graph : a directed edge links a clause to its literal, the direction depends on the sign of the literal
+    liste_nodes = list(graph.nodes)
+    adj_mat = torch.tensor(np.array([nx.to_numpy_matrix(graph)]))
+    np.random.seed(seed)
+    # initial emeddings : degree ;  TODO : we should now try using the outputs of Neurosat or random embeddings
+    nodes_init_embeddings = []
+    for i, (node, degree) in enumerate(
+            list(dict(graph.in_degree).items())):
+        if init == "degree":  # need directed graphs to differentiate x_1 and -x_1 !
+            nodes_init_embeddings.append([float(degree), float(graph.out_degree[node])])
+        elif init == "random":
+            nodes_init_embeddings.append(np.float32(np.random.random((init_dim))))
+        elif init == "neurosat":
+            raise Exception("to be implemented")
+    nodes_init_embeddings = torch.tensor(nodes_init_embeddings)
+    return torch.tensor(nodes_init_embeddings), adj_mat, liste_nodes
+
 
 
 # for lots of reasons, batch size 1 is better to use, lets discuss it later. If needed we accum grad instead.
-def train_model(constraints, objectives, model, optimizer, criterion, log=True, n_epochs=20, debug=False, temp=0.01, gumbel=False):
+def train_model(constraints, objectives, model, optimizer, criterion, log=True, n_epochs=20, debug=False, temp=0.01, gumbel=False, init_emb="random"):
 
     if log :
         print(model)
@@ -100,17 +119,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
         for I, constraint in enumerate(constraints):  # iterate over the set of SAT problems, constraint is a list of clauses
             optimizer.zero_grad()
 
-            nb_nodes = n_nodes_from_constraints(constraint)
-            graph = constraints_to_graph(constraint)  # build the graph : a directed edge links a clause to its literal, the direction depends on the sign of the literal
-            liste_nodes = list(graph.nodes)
-            adj_mat = torch.tensor(np.array([nx.to_numpy_matrix(graph)]))
-
-
-            # initial emeddings : degree ;  TODO : we should now try using the outputs of Neurosat
-            nodes_init_embeddings = []
-            for i , (node, degree) in enumerate(list(dict(graph.in_degree).items())):   # need directed graphs to differentiate x_1 and -x_1 !
-                nodes_init_embeddings.append([float(degree), float(graph.out_degree[node])])
-            nodes_init_embeddings=torch.tensor(nodes_init_embeddings)
+            nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features)
 
             # compute the model output
             logits = model(nodes_init_embeddings, adj_mat, temp, gumbel)
@@ -137,19 +146,17 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
             # chose a way to calculate the SAT value / objective / number of clauses satisfied
 
             # 1: sum all (then multiply targets by 3 for the loss value)
-            sat = torch.sum(AUX)
+            #sat = torch.sum(AUX)
 
             # 2 : softmaxed weighted sum
-            # sat = torch.sum(torch.nn.functional.softmax(AUX / temp, -1) * AUX) # TODO : we can put another temerature here, like temp2, a bit overloading
+            sat = torch.sum(torch.nn.functional.softmax(AUX / temp, -1) * AUX) # TODO : we can put another temerature here, like temp2, a bit overloading
 
             # 3 : max : but problem of exploration (can be solved by setting gumbel=True)
-            #sat = torch.sum(
-                #    torch.max(sftm_lit_full[:, 0][constraint_to_ids(constraint, liste_nodes_litterals_full)],
-                #              -1).values, dtype=torch.float32)
+            #sat = torch.sum(torch.max(AUX, -1).values, dtype=torch.float32)
 
 
             # calculate loss
-            targets = objectives[I]*3.0
+            targets = objectives[I] #*3.0
             loss = criterion(sat, targets) + 0*abs(sftm_lit_full[:,0]-sftm_lit_full[:,1]).sum() # second term to enforce parity and so exploration
                 # no need for additional loss for hard constraints here !
 
@@ -163,8 +170,8 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
             if log :
                 print(logits[0][litteral_lines])
 
-            if log :
-                print("loss :", loss.item(), "   sat : ", sat.item())
+
+            print("loss :", loss.item(), "   sat : ", sat.item())
     print(AUX)
     print("sat : ", sat)
     return sat
