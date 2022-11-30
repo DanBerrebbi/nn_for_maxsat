@@ -143,7 +143,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
     for epoch in range(n_epochs):
         if log or True:
             print("--- Epoch {} ---".format(epoch))
-            eval_model(constraints[9*len(constraints)//10:].to(device), objectives[9*len(constraints)//10:].to(device), model)
+            eval_model(constraints[9*len(constraints)//10:], objectives[9*len(constraints)//10:], model)
         for I, constraint in enumerate(constraints[:9*len(constraints)//10]):  # iterate over the set of SAT problems, constraint is a list of clauses
             optimizer.zero_grad()
             nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features)
@@ -196,6 +196,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
 
 
 def eval_model(constraints, objectives, model, init_emb="random"):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     acc = 0.0
     for I, constraint in enumerate(
             constraints):  # iterate over the set of SAT problems, constraint is a list of clauses
@@ -203,7 +204,7 @@ def eval_model(constraints, objectives, model, init_emb="random"):
                                                                                init_dim=model.in_features)
 
         # compute the model output
-        logits = model(nodes_init_embeddings, adj_mat, temp=0.001, gumbel=False)
+        logits = model(nodes_init_embeddings.to(device), adj_mat.to(device), temp=0.001, gumbel=False)
 
         # compute the loss/objective value
 
@@ -222,7 +223,7 @@ def eval_model(constraints, objectives, model, init_emb="random"):
         # calculate loss
 
         targets = objectives[I][keep_target]  # *3.0
-        acc += ((sftm_lit.max(dim=-1).indices == targets.max(dim=-1).indices).float().sum()).item()/len(sftm_lit)
+        acc += ((sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum()).item()/len(sftm_lit)
         #print(acc/I)
     print("test accuracy :", acc/len(constraints))
     return acc/len(constraints)
