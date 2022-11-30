@@ -133,7 +133,8 @@ def constraint_to_embeddings(constraint, seed, init="random", init_dim=64):
 
 # for lots of reasons, batch size 1 is better to use, lets discuss it later. If needed we accum grad instead.
 def train_model(constraints, objectives, model, optimizer, criterion, log=True, n_epochs=20, debug=False, temp=0.01, gumbel=False, init_emb="random"):
-
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     if log :
         print(model)
         print("Number of parameters : ", sum(p.numel() for p in model.parameters()))
@@ -147,7 +148,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
             nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features)
 
             # compute the model output
-            logits = model(nodes_init_embeddings, adj_mat, temp, gumbel)
+            logits = model(nodes_init_embeddings.to(device), adj_mat, temp, gumbel)
 
             # compute the loss/objective value
 
