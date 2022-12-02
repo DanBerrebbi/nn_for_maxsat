@@ -9,9 +9,10 @@ init_dim = 64
 hidden_dim_gat = 128
 output_dim_gat = 128
 ff_dim = 128
-n_heads = 1
+n_heads = 2
 emb_dim = 128
 dimacs_directory = './dimacs_files/test3_ass/grp1'
+#dimacs_directory = './dimacs_files/test3_small'
 n_transformer_layers = 0
 dropout = 0.0
 
@@ -37,6 +38,6 @@ optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 constraints, objective, ass = read_dimacs_directory_ass(dimacs_directory)
 #objective = torch.tensor([[1.,0.],[0.,1.],[0.,1.]])
 
-train_model(constraints[:9000], ass[:9000], model, optimizer, criterion, log=False, n_epochs=300, debug=False, temp=1, gumbel=False)
+train_model(constraints[:9000], ass[:9000], model, optimizer, criterion, log=False, n_epochs=3, debug=False, temp=1, gumbel=False)
 
 eval_model(constraints[-100:], ass[-100:], model)

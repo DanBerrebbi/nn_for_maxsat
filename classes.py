@@ -13,6 +13,7 @@ class GATCodeur(torch.nn.Module):
         self.GAT = Encoder(ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout)
         self.encoders = Stacked_Encoder(n_layers, ff_dim, n_heads, emb_dim, qk_dim, v_dim, dropout)
         self.init_dim=in_features
+        self.n_heads=n_heads
 
 
     def forward(self, src, adj_mat, temp=0.1, gumbel=False):
@@ -89,7 +90,7 @@ class MultiHead_Attn(torch.nn.Module):
         # v is [bs, lv, ed]
         # msk is [bs, 1, ls] or [bs, lt, lt]
 
-        if msk is not None:
+        if msk is not None and len(msk.shape)<4:
             msk = msk.unsqueeze(1)  # [bs, 1, 1, ls] or [bs, 1, lt, lt]
 
         # logging.info('msk = {}'.format(msk.shape))
@@ -115,14 +116,15 @@ class MultiHead_Attn(torch.nn.Module):
 
         if msk is not None:
             #s = s.masked_fill(msk == 0, float('-inf'))  # score=-Inf to masked tokens
-            s = s.masked_fill(msk == 0, -1000)
+            assert msk.shape[1]==self.nh # not necessary (dan)(just for debugging for now)
+            s = s.masked_fill(msk == 0, -10000)
         w = torch.nn.functional.softmax(s, dim=-1)  # [bs,nh,lq,lk] (these are the attention weights)
         #import pdb; pdb.set_trace()
         #### we can use relu instead of softmax: w = torch.nn.functional.relu(s)
         w = self.dropout(w)  # [bs,nh,lq,lk]
 
         z = torch.matmul(w, V)  # [bs,nh,lq,lk] x [bs,nh,lv,vd] = [bs,nh,lq,vd] #thanks to lk==lv
-        z = z.transpose(1, 2).contiguous().view([bs, lq, self.nh * self.vd])  # => [bs,lq,nh,vd] => [bs,lq,nh*vd]
+        z = z.transpose(1, 2).contiguous().view([bs, lq, self.nh * self.vd])  # => [bs,lq,nh,vd] => [bs,lq,nh*vd]  # here we concatenate the heads !
         z = self.WO(z)  # [bs,lq,ed]
         return self.dropout(z)
 

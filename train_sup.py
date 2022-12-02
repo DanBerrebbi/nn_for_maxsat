@@ -7,7 +7,16 @@ import torch
 import torch.nn.functional as F
 
 
-def constraints_to_graph(constraints, directed=True):
+def constraints_to_graph(constraints, directed=True, multihead=False):
+  if multihead:
+      G = nx.Graph()
+      for i, clause in enumerate(constraints[0]):
+          for node in clause:
+              if node == abs(node):  # only one node for x_1 and -x_1
+                  G.add_edge(node, "c_{}".format(i), weight=1)
+              else:
+                  G.add_edge(abs(node), "c_{}".format(i), weight=-1)
+      return G
   if directed:
     G = nx.DiGraph()
     for i,clause in enumerate(constraints[0]):
@@ -110,25 +119,40 @@ def ass_to_obj(ass):
         obj.append(one_obj)
     return torch.tensor(obj)
 
-def constraint_to_embeddings(constraint, seed, init="random", init_dim=64):
-    graph = constraints_to_graph(
-        constraint)  # build the graph : a directed edge links a clause to its literal, the direction depends on the sign of the literal
-    liste_nodes = list(graph.nodes)
-    adj_mat = torch.tensor(np.array([nx.to_numpy_matrix(graph)]))
-    np.random.seed(seed)
-    # initial emeddings : degree ;  TODO : we should now try using the outputs of NeuroSat or random embeddings
-    nodes_init_embeddings = []
-    for i, (node, degree) in enumerate(
-            list(dict(graph.in_degree).items())):
-        if init == "degree":  # need directed graphs to differentiate x_1 and -x_1 !
-            nodes_init_embeddings.append([float(degree), float(graph.out_degree[node])])
-        elif init == "random":
-            nodes_init_embeddings.append(np.float32(np.random.random((init_dim))))
-        elif init == "neurosat":
-            raise Exception("to be implemented")
-    nodes_init_embeddings = torch.tensor(np.array(nodes_init_embeddings))
-    return nodes_init_embeddings, adj_mat, liste_nodes
+def constraint_to_embeddings(constraint, seed, init="random", init_dim=64, multihead=False):
+    if multihead:
+        #import pdb; pdb.set_trace()
+        graph = constraints_to_graph(
+            constraint, directed=True, multihead=multihead)  # build the graph : a directed edge links a clause to its literal, the direction depends on the sign of the literal
+        liste_nodes = list(graph.nodes)
+        adj_mat = torch.tensor(np.array([nx.to_numpy_matrix(graph)]))
 
+        np.random.seed(seed)
+        nodes_init_embeddings = []
+        for _ in liste_nodes:
+            if init == "random":
+                nodes_init_embeddings.append(np.float32(np.random.random((init_dim))))
+        nodes_init_embeddings = torch.tensor(np.array(nodes_init_embeddings))
+        return nodes_init_embeddings, adj_mat, liste_nodes
+
+    else :
+        graph = constraints_to_graph(
+            constraint, directed=True, multihead=multihead)  # build the graph : a directed edge links a clause to its literal, the direction depends on the sign of the literal
+        liste_nodes = list(graph.nodes)
+        adj_mat = torch.tensor(np.array([nx.to_numpy_matrix(graph)]))
+        np.random.seed(seed)
+        # initial emeddings : degree ;  TODO : we should now try using the outputs of NeuroSat or random embeddings
+        nodes_init_embeddings = []
+        for i, (node, degree) in enumerate(
+                list(dict(graph.in_degree).items())):
+            if init == "degree":  # need directed graphs to differentiate x_1 and -x_1 !
+                nodes_init_embeddings.append([float(degree), float(graph.out_degree[node])])
+            elif init == "random":
+                nodes_init_embeddings.append(np.float32(np.random.random((init_dim))))
+            elif init == "neurosat":
+                raise Exception("to be implemented")
+        nodes_init_embeddings = torch.tensor(np.array(nodes_init_embeddings))
+        return nodes_init_embeddings, adj_mat, liste_nodes
 
 
 # for lots of reasons, batch size 1 is better to use, lets discuss it later. If needed we accum grad instead.
@@ -147,10 +171,16 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
             eval_model(constraints[9*len(constraints)//10:], objectives[9*len(constraints)//10:], model)
         for I, constraint in enumerate(constraints[:9*len(constraints)//10]):  # iterate over the set of SAT problems, constraint is a list of clauses
             optimizer.zero_grad()
-            nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features)
+            nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features, multihead=(model.n_heads>1))
+            if (model.n_heads>1):
+                adj_mat_pos = torch.max(adj_mat,torch.zeros_like(adj_mat))[None,:,:,:]
+                adj_mat_neg = torch.max(-adj_mat, torch.zeros_like(adj_mat))[None,:,:,:]
+                multi_adj_mat = torch.cat([adj_mat_pos,adj_mat_neg], dim=1)
 
-            # compute the model output
-            logits = model(nodes_init_embeddings.to(device), adj_mat.to(device), temp, gumbel)
+                # compute the model output
+                logits = model(nodes_init_embeddings.to(device), multi_adj_mat.to(device), temp, gumbel)
+            else :
+                logits = model(nodes_init_embeddings.to(device), adj_mat.to(device), temp, gumbel)
 
             # compute the loss/objective value
 
@@ -190,7 +220,7 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
                 print("loss :", loss.item())
                 #import pdb; pdb.set_trace()
                 print("acc :", (sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum())
-        print("train accuracy :",acc_train/(I+1))
+            print("train accuracy :",acc_train/(I+1))
     #print("sftm : ", sftm_lit)
     #return sftm_lit
     # print(sftm)
@@ -203,10 +233,18 @@ def eval_model(constraints, objectives, model, init_emb="random"):
     for I, constraint in enumerate(
             constraints):  # iterate over the set of SAT problems, constraint is a list of clauses
         nodes_init_embeddings, adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb,
-                                                                               init_dim=model.in_features)
+                                                                               init_dim=model.in_features, multihead=(model.n_heads>1))
 
+        if (model.n_heads > 1):
+            adj_mat_pos = torch.max(adj_mat, torch.zeros_like(adj_mat))[None, :, :, :]
+            adj_mat_neg = torch.max(-adj_mat, torch.zeros_like(adj_mat))[None, :, :, :]
+            multi_adj_mat = torch.cat([adj_mat_pos, adj_mat_neg], dim=1)
+
+            # compute the model output
+            logits = model(nodes_init_embeddings.to(device), multi_adj_mat.to(device), temp=0.001, gumbel=False)
         # compute the model output
-        logits = model(nodes_init_embeddings.to(device), adj_mat.to(device), temp=0.001, gumbel=False)
+        else :
+            logits = model(nodes_init_embeddings.to(device), adj_mat.to(device), temp=0.001, gumbel=False)
 
         # compute the loss/objective value
 
