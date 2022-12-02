@@ -16,7 +16,7 @@ class GATCodeur(torch.nn.Module):
 
 
     def forward(self, src, adj_mat, temp=0.1, gumbel=False):
-        init_emb=self.proj1(src)[None, :]
+        init_emb=self.proj1(src)
         gat_output = self.GAT(init_emb, msk=adj_mat)
         proj=self.encoders(gat_output)
         if gumbel :
@@ -141,4 +141,5 @@ class FeedForward(torch.nn.Module):
         tmp = self.FF_out(tmp)
         tmp = self.dropout(tmp)
         return tmp
+
 
