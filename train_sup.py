@@ -208,22 +208,10 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
                     print(name, param.grad)
 
             optimizer.step()
-            if log :
-                print(logits[0][litteral_lines])
 
-                #print("loss :", loss.item(), "   sftm : ", sftm_lit)
-                print("sftm : ", sftm_lit)
-                print("loss :", loss.item())
-                print("$$$"*30)
             acc_train += ((sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum()).item()/len(sftm_lit)
-            if np.random.random()<0.00 :
-                print("loss :", loss.item())
-                #import pdb; pdb.set_trace()
-                print("acc :", (sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum())
-            print("train accuracy :",acc_train/(I+1))
-    #print("sftm : ", sftm_lit)
-    #return sftm_lit
-    # print(sftm)
+        print("train accuracy :",acc_train/(I+1))
+
 
 
 
