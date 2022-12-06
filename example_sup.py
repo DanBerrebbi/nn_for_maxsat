@@ -13,8 +13,9 @@ n_heads = 2
 emb_dim = 128
 dimacs_directory = './dimacs_files/test3_ass/grp1'
 #dimacs_directory = './dimacs_files/test3_small'
-n_transformer_layers = 0
-dropout = 0.0
+#dimacs_directory = "./dimacs_files/ksat3_30_300/grp1" 
+n_transformer_layers = 4
+dropout = 0.2
 
 #torch.manual_seed(222222)
 model = GATCodeur(n_layers=n_transformer_layers,
@@ -33,11 +34,12 @@ model = GATCodeur(n_layers=n_transformer_layers,
 criterion = CrossEntropyLoss()
 
 #optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-09)
-optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.001)
 
 constraints, objective, ass = read_dimacs_directory_ass(dimacs_directory)
 #objective = torch.tensor([[1.,0.],[0.,1.],[0.,1.]])
+PATH = "mdoel_sgd_0.001_1_layer.pt"
 
-train_model(constraints[:9000], ass[:9000], model, optimizer, criterion, log=False, n_epochs=3, debug=False, temp=1, gumbel=False)
+train_model(constraints, ass, model, optimizer, criterion, log=False, n_epochs=300, debug=False, temp=1, gumbel=False, PATH=PATH)
 
-eval_model(constraints[-100:], ass[-100:], model)
+eval_model(constraints[9000:], ass[9000:], model)

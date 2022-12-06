@@ -121,7 +121,6 @@ def ass_to_obj(ass):
 
 def constraint_to_embeddings(constraint, seed, init="random", init_dim=64, multihead=False):
     if multihead:
-        #import pdb; pdb.set_trace()
         graph = constraints_to_graph(
             constraint, directed=True, multihead=multihead)  # build the graph : a directed edge links a clause to its literal, the direction depends on the sign of the literal
         liste_nodes = list(graph.nodes)
@@ -129,10 +128,11 @@ def constraint_to_embeddings(constraint, seed, init="random", init_dim=64, multi
 
         np.random.seed(seed)
         nodes_init_embeddings = []
-        for _ in liste_nodes:
-            if init == "random":
-                nodes_init_embeddings.append(np.float32(np.random.random((init_dim))))
-        nodes_init_embeddings = torch.tensor(np.array(nodes_init_embeddings))
+        
+        if init == "random":
+            #nodes_init_embeddings=np.float32(np.random.random((len(liste_nodes), init_dim)))
+            nodes_init_embeddings = torch.rand((len(liste_nodes), init_dim))
+        #nodes_init_embeddings = torch.tensor(nodes_init_embeddings)
         return nodes_init_embeddings, adj_mat, liste_nodes
 
     else :
@@ -156,9 +156,10 @@ def constraint_to_embeddings(constraint, seed, init="random", init_dim=64, multi
 
 
 # for lots of reasons, batch size 1 is better to use, lets discuss it later. If needed we accum grad instead.
-def train_model(constraints, objectives, model, optimizer, criterion, log=True, n_epochs=20, debug=False, temp=0.01, gumbel=False, init_emb="random"):
+def train_model(constraints, objectives, model, optimizer, criterion, log=True, n_epochs=20, debug=False, temp=0.01, gumbel=False, init_emb="random", PATH="model_unk.pt"):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
+    model.train()
     if log :
         print(model)
         print("Number of parameters : ", sum(p.numel() for p in model.parameters()))
@@ -166,19 +167,22 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
     # enumerate epochs
     for epoch in range(n_epochs):
         acc_train = 0
-        if log or True:
-            print("--- Epoch {} ---".format(epoch))
-            eval_model(constraints[9*len(constraints)//10:], objectives[9*len(constraints)//10:], model)
+        print("--- Epoch {} ---".format(epoch))
+        eval_model(constraints[9*len(constraints)//10:], objectives[9*len(constraints)//10:], model)
         for I, constraint in enumerate(constraints[:9*len(constraints)//10]):  # iterate over the set of SAT problems, constraint is a list of clauses
             optimizer.zero_grad()
+            #print(50*"$$$")
+            import time; t1 = time.time()
             nodes_init_embeddings , adj_mat, liste_nodes = constraint_to_embeddings(constraint, seed=I, init=init_emb, init_dim=model.in_features, multihead=(model.n_heads>1))
+            #t2 = time.time(); print(t2-t1)
             if (model.n_heads>1):
                 adj_mat_pos = torch.max(adj_mat,torch.zeros_like(adj_mat))[None,:,:,:]
                 adj_mat_neg = torch.max(-adj_mat, torch.zeros_like(adj_mat))[None,:,:,:]
                 multi_adj_mat = torch.cat([adj_mat_pos,adj_mat_neg], dim=1)
-
+                #t3 = time.time(); print(t3-t2)
                 # compute the model output
                 logits = model(nodes_init_embeddings.to(device), multi_adj_mat.to(device), temp, gumbel)
+                #t4 = time.time(); print(t4-t3)
             else :
                 logits = model(nodes_init_embeddings.to(device), adj_mat.to(device), temp, gumbel)
 
@@ -195,22 +199,21 @@ def train_model(constraints, objectives, model, optimizer, criterion, log=True, 
             keep_target = [k-1 for k in litteral_lines_s.keys()]
             # need to duplicate sftm so that there is the negatives. Probably there exist smarter way to do it
             sftm_lit = logits[0][selected_lines]
+            #t5 = time.time(); print(t5-t4)
 
             # calculate loss
 
-            targets = objectives[I][keep_target] #*3.0
+            targets = objectives[I][keep_target] 
             loss = criterion(sftm_lit, targets.to(device))
-
             loss.backward()
-
-            if debug :
-                for name, param in model.named_parameters():
-                    print(name, param.grad)
-
             optimizer.step()
+            #t6 = time.time(); print(t6-t5)
 
             acc_train += ((sftm_lit.max(dim=-1).indices == targets.to(device).max(dim=-1).indices).float().sum()).item()/len(sftm_lit)
         print("train accuracy :",acc_train/(I+1))
+        torch.save(model.state_dict(), PATH)
+
+
 
 
 
